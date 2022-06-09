@@ -81,14 +81,18 @@ namespace System.Net.Http.Headers
 
         public MediaTypeHeaderValue(string mediaType)
             : this(mediaType, charSet: null)
-        {
+        {         
         }
 
         public MediaTypeHeaderValue(string mediaType, string? charSet)
         {
-            CheckMediaTypeFormat(mediaType, nameof(mediaType));
+            var len = MediaTypeHeaderValue.GetMediaTypeLength(mediaType, 0, out string? mediaType, out UnvalidatedObjectCollection<NameValueHeaderValue>? parameters);
+            if (len == 0)
+            {
+                throw new FormatException(SR.Format(System.Globalization.CultureInfo.InvariantCulture, SR.net_http_headers_invalid_value, mediaType));
+            }
             _mediaType = mediaType;
-
+            _parameters = parameters;
             if (!string.IsNullOrEmpty(charSet))
             {
                 CharSet = charSet;
@@ -149,10 +153,24 @@ namespace System.Net.Http.Headers
         internal static int GetMediaTypeLength(string? input, int startIndex,
             Func<MediaTypeHeaderValue> mediaTypeCreator, out MediaTypeHeaderValue? parsedValue)
         {
+            var len = MediaTypeHeaderValue.GetMediaTypeLength(input, startIndex, out string? mediaType, out UnvalidatedObjectCollection<NameValueHeaderValue>? parameters);
+            parsedValue = null;
+            if (len > 0)
+            {
+                parsedValue = mediaTypeCreator();
+                parsedValue._mediaType = mediaType;
+                parsedValue._parameters = parameters;
+            }
+            return len;
+        }
+
+        private static int GetMediaTypeLength(string? input, int startIndex, out string? parsedMediaType, out UnvalidatedObjectCollection<NameValueHeaderValue>? parsedParameters)
+        {
             Debug.Assert(mediaTypeCreator != null);
             Debug.Assert(startIndex >= 0);
 
-            parsedValue = null;
+            parsedMediaType = null;
+            parsedParameters = null;
 
             if (string.IsNullOrEmpty(input) || (startIndex >= input.Length))
             {
@@ -169,31 +187,26 @@ namespace System.Net.Http.Headers
 
             int current = startIndex + mediaTypeLength;
             current = current + HttpRuleParser.GetWhitespaceLength(input, current);
-            MediaTypeHeaderValue mediaTypeHeader;
 
             // If we're not done and we have a parameter delimiter, then we have a list of parameters.
             if ((current < input.Length) && (input[current] == ';'))
             {
-                mediaTypeHeader = mediaTypeCreator();
-                mediaTypeHeader._mediaType = mediaType;
-
                 current++; // skip delimiter.
-                int parameterLength = NameValueHeaderValue.GetNameValueListLength(input, current, ';',
-                    (UnvalidatedObjectCollection<NameValueHeaderValue>)mediaTypeHeader.Parameters);
+                var parameters = new UnvalidatedObjectCollection<NameValueHeaderValue>();
+                int parameterLength = NameValueHeaderValue.GetNameValueListLength(input, current, ';', parameters);
 
                 if (parameterLength == 0)
                 {
                     return 0;
                 }
 
-                parsedValue = mediaTypeHeader;
+                parsedMediaType = mediaType;
+                parsedParameters = parameters;
                 return current + parameterLength - startIndex;
             }
 
             // We have a media type without parameters.
-            mediaTypeHeader = mediaTypeCreator();
-            mediaTypeHeader._mediaType = mediaType;
-            parsedValue = mediaTypeHeader;
+            parsedMediaType = mediaType;
             return current - startIndex;
         }
 
